@@ -142,6 +142,7 @@ try
         std::cerr << "No device connected, please connect a RealSense device" << std::endl;
         return EXIT_FAILURE;
     }
+    int num_devices = devices.size();
 
     // Configure streams
     rs2::config config_pipe;
@@ -155,11 +156,18 @@ try
     rs2::colorizer color_map;
 
     // Start streaming
-    rs2::pipeline pipe;
-    pipe.start(config_pipe);
+    std::vector<rs2::pipeline> pipelines;
+    for (auto &&dev : ctx.query_devices())
+    {
+        rs2::pipeline pipe(ctx);
+        rs2::config cfg;
+        cfg.enable_device(dev.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER));
+        pipe.start(cfg);
+        pipelines.emplace_back(pipe);
+    }
 
     // Print active device information
-    rs2::pipeline_profile active_pipe_profile = pipe.get_active_profile();
+    rs2::pipeline_profile active_pipe_profile = pipelines[0].get_active_profile();
     rs2::device dev = active_pipe_profile.get_device();
     std::cout << "Device information: " << std::endl;
     for (int i = 0; i < static_cast<int>(RS2_CAMERA_INFO_COUNT); i++)
@@ -232,7 +240,7 @@ try
 
     // Capture 30 frames to give autoexposure, etc. a chance to settle
     for (int i = 0; i < 30; ++i)
-        pipe.wait_for_frames();
+        pipelines[0].wait_for_frames();
 
     // Get camera intrinsics of color sensor
     rs2::video_stream_profile color_stream_profile = active_pipe_profile.get_stream(rs2_stream::RS2_STREAM_COLOR).as<rs2::video_stream_profile>();
@@ -260,37 +268,54 @@ try
     // Create alignment object (for aligning depth frame to color frame)
     rs2::align align(rs2_stream::RS2_STREAM_COLOR);
 
+    float row_height = app.height() / num_devices;
+
     while (app) // Application still alive?
     {
+        // Collect the new frames from all the connected devices
+        std::vector<rs2::frameset> new_framesets;
+        for (auto &&pipe : pipelines)
+        {
+            new_framesets.emplace_back(pipe.wait_for_frames());
+        }
         // Wait for next set of RGB-D frames from the camera
-        rs2::frameset data = pipe.wait_for_frames();
         long epoch_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        rs2::frame color = data.get_color_frame();
-        // rs2::depth_frame raw_depth = data.get_depth_frame();
+        int idx = 0;
+        for (rs2::frameset &fs : new_framesets)
+        {
+            rs2::frame color = fs.get_color_frame();
+            auto processed = align.process(fs);
+            rs2::depth_frame aligned_depth = processed.get_depth_frame();
+            // Find and colorize the depth data
+            rs2::frame depth_colorized = color_map.colorize(aligned_depth);
+            int depth_size = aligned_depth.get_width() * aligned_depth.get_height() * aligned_depth.get_bytes_per_pixel();
 
-        // // Get aligned depth frames
-        auto processed = align.process(data);
-        rs2::depth_frame aligned_depth = processed.get_depth_frame();
+            realsense_server.update_buffer((unsigned char *)aligned_depth.get_data(), 9 * 4 + 9 * 4 + 16 * 4 + 4 + 8, depth_size);
 
-        // Find and colorize the depth data
-        rs2::frame depth_colorized = color_map.colorize(aligned_depth);
+            int color_size = fs.get_color_frame().get_width() * fs.get_color_frame().get_height() * fs.get_color_frame().get_bytes_per_pixel();
+            realsense_server.update_buffer((unsigned char *)color.get_data(), 9 * 4 + 9 * 4 + 16 * 4 + 4 + 8 + depth_size, color_size);
 
-        int depth_size = aligned_depth.get_width() * aligned_depth.get_height() * aligned_depth.get_bytes_per_pixel();
-        realsense_server.update_buffer((unsigned char *)aligned_depth.get_data(), 9 * 4 + 9 * 4 + 16 * 4 + 4 + 8, depth_size);
+            // Save header: color camera intrinsics, depth camera intrinsics, color to depth camera extrinsics, depth scale, and timestamp
+            realsense_server.update_buffer((unsigned char *)color_intrinsics_arr, 0, 9 * 4);
+            realsense_server.update_buffer((unsigned char *)depth_intrinsics_arr, 9 * 4, 9 * 4);
+            realsense_server.update_buffer((unsigned char *)depth_to_color_extrinsics_arr, 9 * 4 + 9 * 4, 16 * 4);
+            realsense_server.update_buffer((unsigned char *)&depth_scale, 9 * 4 + 9 * 4 + 16 * 4, 4);
+            realsense_server.update_buffer((unsigned char *)&epoch_timestamp, 9 * 4 + 9 * 4 + 16 * 4 + 4, 8);
 
-        int color_size = data.get_color_frame().get_width() * data.get_color_frame().get_height() * data.get_color_frame().get_bytes_per_pixel();
-        realsense_server.update_buffer((unsigned char *)color.get_data(), 9 * 4 + 9 * 4 + 16 * 4 + 4 + 8 + depth_size, color_size);
+            // Render depth on to the first half of the screen and color on to the second
 
-        // Save header: color camera intrinsics, depth camera intrinsics, color to depth camera extrinsics, depth scale, and timestamp
-        realsense_server.update_buffer((unsigned char *)color_intrinsics_arr, 0, 9 * 4);
-        realsense_server.update_buffer((unsigned char *)depth_intrinsics_arr, 9 * 4, 9 * 4);
-        realsense_server.update_buffer((unsigned char *)depth_to_color_extrinsics_arr, 9 * 4 + 9 * 4, 16 * 4);
-        realsense_server.update_buffer((unsigned char *)&depth_scale, 9 * 4 + 9 * 4 + 16 * 4, 4);
-        realsense_server.update_buffer((unsigned char *)&epoch_timestamp, 9 * 4 + 9 * 4 + 16 * 4 + 4, 8);
-
-        // Render depth on to the first half of the screen and color on to the second
-        depth_image.render(depth_colorized, {0, 0, app.width() / 2, app.height()});
-        color_image.render(color, {app.width() / 2, 0, app.width() / 2, app.height()});
+            depth_image.render(depth_colorized,
+                               {0,
+                                idx * row_height,
+                                app.width() / 2,
+                                row_height});
+            color_image.render(color,
+                               {app.width() / 2,
+                                idx * row_height,
+                                app.width() / 2,
+                                row_height});
+            idx += 1;
+        }
     }
 
     return EXIT_SUCCESS;

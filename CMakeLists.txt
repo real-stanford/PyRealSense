@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 2.8.9)
 project (realsense)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-#set(CMAKE_BUILD_TYPE "Release" )
-set(CMAKE_BUILD_TYPE "Debug" )
+set(CMAKE_BUILD_TYPE "Release" )
+# set(CMAKE_BUILD_TYPE "Debug" )
 
 # This parameter is meant for disabling graphical examples when building for
 # save-to-disk targets.
@@ -53,4 +53,6 @@ endif()
 
 set(PROJECT_LINK_LIBS librealsense2.so)
 add_executable(realsense realsense.cpp)
+add_executable(multirealsense multirealsense.cpp)
 target_link_libraries(realsense pthread ${DEPENDENCIES} ${PROJECT_LINK_LIBS})
+target_link_libraries(multirealsense pthread ${DEPENDENCIES} ${PROJECT_LINK_LIBS})
