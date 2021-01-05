@@ -52,6 +52,7 @@ Server::Server(int port)
     memset(serv_addr.sin_zero, '\0', sizeof(serv_addr.sin_zero));
     bind(init_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
     send_buffer = new char[buffer_size];
+    std::cout << "[Server] started on localhost:" << port << std::endl;
 }
 
 void Server::init_listener_thread()
@@ -65,14 +66,14 @@ void *Server::listener_thread()
     while (true)
     {
         if (listen(init_sock, 5) == 0)
-            printf("Listening...\n");
+            printf("[Server] Listening...\n");
         else
-            printf("Error.\n");
+            printf("[Server] Error.\n");
 
         // Creates new socket for incoming connection
         addr_size = sizeof(serv_storage);
         conn_sock = accept(init_sock, (struct sockaddr *)&serv_storage, &addr_size);
-        printf("Connected to client.\n");
+        printf("[Server] Connected to client.\n");
 
         while (true)
         {
@@ -87,10 +88,10 @@ void *Server::listener_thread()
             pthread_mutex_lock(&buffer_access_mutex);
             int msg_size = send(conn_sock, send_buffer, buffer_size, MSG_MORE);
             if (msg_size == 0)
-                printf("Warning: No data was sent to client.\n");
+                printf("[Server] Warning: No data was sent to client.\n");
             int tmp = errno;
             if (msg_size < 0)
-                printf("Errno %d\n", tmp);
+                printf("[Server] Errno %d\n", tmp);
             pthread_mutex_unlock(&buffer_access_mutex);
         }
     }
@@ -127,8 +128,12 @@ const int depth_disparity_shift = 0;
 int main(int argc, char *argv[])
 try
 {
-
-    Server realsense_server(50010);
+    int port = 50010;
+    if (argc == 2){
+	// second args is port
+	port = std::stoi(argv[1]);
+    }
+    Server realsense_server(port);
     realsense_server.init_listener_thread();
 
     // Create a simple OpenGL window for rendering:
@@ -143,10 +148,23 @@ try
         return EXIT_FAILURE;
     }
 
+
     // Configure streams
     rs2::config config_pipe;
     config_pipe.enable_stream(rs2_stream::RS2_STREAM_DEPTH, stream_width, stream_height, RS2_FORMAT_Z16, stream_fps);
     config_pipe.enable_stream(rs2_stream::RS2_STREAM_COLOR, stream_width, stream_height, RS2_FORMAT_RGB8, std::min(stream_fps, 60));
+
+
+    if (devices.size() > 1){
+	int i;
+	std::cout << "Found " << devices.size() << " devices." << std::endl;
+	for (i = 0; i < devices.size(); ++i){
+	    std::cout << "[" << i << "] "<< devices[i].get_info(rs2_camera_info::RS2_CAMERA_INFO_SERIAL_NUMBER) << std::endl;
+	}
+	std::cout << "Pick one device: ";
+	std::cin >> i;
+	config_pipe.enable_device(devices[i].get_info(rs2_camera_info::RS2_CAMERA_INFO_SERIAL_NUMBER));
+    }
 
     // Declare two textures on the GPU, one for color and one for depth
     texture depth_image, color_image;
@@ -161,6 +179,7 @@ try
     // Print active device information
     rs2::pipeline_profile active_pipe_profile = pipe.get_active_profile();
     rs2::device dev = active_pipe_profile.get_device();
+#ifdef LOG_INFO
     std::cout << "Device information: " << std::endl;
     for (int i = 0; i < static_cast<int>(RS2_CAMERA_INFO_COUNT); i++)
     {
@@ -171,7 +190,7 @@ try
         else
             std::cout << "N/A" << std::endl;
     }
-
+#endif
     // Create advanced mode abstraction for RS400 device and set disparity shift
     rs400::advanced_mode advanced(dev);
     STDepthTableControl depth_table_control;
@@ -196,6 +215,7 @@ try
     if (color_sensor.supports(wb_option_type))
         color_sensor.set_option(wb_option_type, 1);
 
+#ifdef LOG_INFO 
     std::cout << "Sensor supports the following options:\n"
               << std::endl;
 
@@ -229,6 +249,7 @@ try
             std::cout << " is not supported" << std::endl;
         }
     }
+#endif
 
     // Capture 30 frames to give autoexposure, etc. a chance to settle
     for (int i = 0; i < 30; ++i)

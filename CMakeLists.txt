@@ -3,7 +3,11 @@ project (realsense)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 set(CMAKE_BUILD_TYPE "Release" )
-# set(CMAKE_BUILD_TYPE "Debug" )
+
+option(LOG_INFO "Log Device Information when running" OFF)
+if(LOG_INFO)
+    add_definitions(-DLOG_INFO)
+endif()
 
 # This parameter is meant for disabling graphical examples when building for
 # save-to-disk targets.
