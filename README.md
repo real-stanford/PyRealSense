@@ -5,7 +5,7 @@ The latest version of our system uses RGB-D data captured from an [Intel® RealS
 #### Installation Instructions:
 
 1. Download and install [librealsense SDK 2.0](https://github.com/IntelRealSense/librealsense)
-1. Compile `realsense.cpp`:
+2. Compile `realsense.cpp`:
 
     ```shell
     cd realsense
@@ -14,6 +14,8 @@ The latest version of our system uses RGB-D data captured from an [Intel® RealS
     cmake ..
     make
     ```
+
+Note: To enable verbose logging of device information, use `cmake -DLOG_INFO ..` instead.
 
 #### To Run
 
@@ -24,13 +26,29 @@ To start the TCP server and RGB-D streaming, run the following:
     ./realsense
     ```
 
-2. Keep the executable running, and test a python TCP client that fetches RGB-D data from the active TCP server, run the following:
+    Optionally, pick your own port
+
+    ```shell
+    ./realsense 12345
+    ```
+
+2. If there are multiple cameras, a prompt will print out their serial numbers and ask you to choose which device
+
+    ```shell
+    Found 2 devices.
+    [0] 821212062745
+    [1] 805212060035
+    Pick one device:
+    ```
+    In this case, for instance, you can choose `0` or `1`.
+
+3. Keep the executable running, and test a python TCP client that fetches RGB-D data from the active TCP server, run the following:
 
     ```shell
     python capture.py
     ```
 
-3. You can change the camera parameter by changing the following lines in the ``realsense.cpp`` file:
+4. You can change the camera parameter by changing the following lines in the ``realsense.cpp`` file:
 
     ```shell
     int stream_width = 640;
@@ -47,7 +65,6 @@ To start the TCP server and RGB-D streaming, run the following:
     self.tcp_host_ip = '127.0.0.1'     
     self.tcp_port = 50010
     ```
-
 
 ## NOTE: FIX FOR VERSIONS PRIOR TO V2.16 (V2.15 and earlier)
 Change the below line:
