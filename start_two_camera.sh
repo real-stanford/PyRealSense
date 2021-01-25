@@ -1,1 +1,2 @@
-./realsense 805212060035 50010 & ./realsense 805212060035 50011 1280 720 0 
+#/bin/sh
+echo 0 | build/realsense 12346 & echo 1 | build/realsense 12345

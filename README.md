@@ -32,6 +32,11 @@ To start the TCP server and RGB-D streaming, run the following:
     ./realsense 12345
     ```
 
+    Optionally, pick your own port and manual exposure
+    ```shell
+    ./realsense 12345 120
+    ```
+
 2. If there are multiple cameras, a prompt will print out their serial numbers and ask you to choose which device
 
     ```shell

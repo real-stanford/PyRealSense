@@ -122,17 +122,21 @@ void Server::update_buffer(const unsigned char *data, int offset, unsigned long 
 const int stream_width = 1280;
 const int stream_height = 720;
 const int stream_fps = 30;
+// const int depth_disparity_shift = 30;
+// const int depthUnits = 50;
 const int depth_disparity_shift = 0;
+const int depthUnits = 100;
 
 // Capture color and depth video streams, render them to the screen, send them through TCP
 int main(int argc, char *argv[])
 try
 {
     int port = 50010;
-    if (argc == 2){
-	// second args is port
-	port = std::stoi(argv[1]);
-    }
+    float gain = -1.0f;
+    if (argc >= 2)
+        port = std::stoi(argv[1]);
+    if (argc >= 3)
+        gain = std::stof(argv[2]);
     Server realsense_server(port);
     realsense_server.init_listener_thread();
 
@@ -148,22 +152,22 @@ try
         return EXIT_FAILURE;
     }
 
-
     // Configure streams
     rs2::config config_pipe;
     config_pipe.enable_stream(rs2_stream::RS2_STREAM_DEPTH, stream_width, stream_height, RS2_FORMAT_Z16, stream_fps);
     config_pipe.enable_stream(rs2_stream::RS2_STREAM_COLOR, stream_width, stream_height, RS2_FORMAT_RGB8, std::min(stream_fps, 60));
 
-
-    if (devices.size() > 1){
-	int i;
-	std::cout << "Found " << devices.size() << " devices." << std::endl;
-	for (i = 0; i < devices.size(); ++i){
-	    std::cout << "[" << i << "] "<< devices[i].get_info(rs2_camera_info::RS2_CAMERA_INFO_SERIAL_NUMBER) << std::endl;
-	}
-	std::cout << "Pick one device: ";
-	std::cin >> i;
-	config_pipe.enable_device(devices[i].get_info(rs2_camera_info::RS2_CAMERA_INFO_SERIAL_NUMBER));
+    if (devices.size() > 1)
+    {
+        int i;
+        std::cout << "Found " << devices.size() << " devices." << std::endl;
+        for (i = 0; i < devices.size(); ++i)
+        {
+            std::cout << "[" << i << "] " << devices[i].get_info(rs2_camera_info::RS2_CAMERA_INFO_SERIAL_NUMBER) << std::endl;
+        }
+        std::cout << "Pick one device: ";
+        std::cin >> i;
+        config_pipe.enable_device(devices[i].get_info(rs2_camera_info::RS2_CAMERA_INFO_SERIAL_NUMBER));
     }
 
     // Declare two textures on the GPU, one for color and one for depth
@@ -196,10 +200,15 @@ try
     STDepthTableControl depth_table_control;
     if (advanced.is_enabled())
     {
+        std::cout << "Advanced mode enabled" << std::endl;
         depth_table_control = advanced.get_depth_table();           // Initialize depth table control group
-        depth_table_control.depthUnits = 100;                       // Interpret RMS error at 100 micrometers
+        depth_table_control.depthUnits = depthUnits;                // Interpret RMS error at 100 micrometers
         depth_table_control.disparityShift = depth_disparity_shift; // Set disparity shift
         advanced.set_depth_table(depth_table_control);
+    }
+    else
+    {
+        std::cout << "Advanced mode disabled" << std::endl;
     }
 
     // Get active device sensors
@@ -208,16 +217,31 @@ try
     rs2::sensor color_sensor = sensors[1];
 
     // Disable auto exposure and enable auto white balancing for color sensor
-    rs2_option ae_option_type = static_cast<rs2_option>(10);
+    rs2_option ae_option_type = rs2_option::RS2_OPTION_ENABLE_AUTO_EXPOSURE;
     rs2_option wb_option_type = static_cast<rs2_option>(11);
     if (color_sensor.supports(ae_option_type))
-        color_sensor.set_option(ae_option_type, 1);
-    if (color_sensor.supports(wb_option_type))
-        color_sensor.set_option(wb_option_type, 1);
+    {
+        color_sensor.set_option(ae_option_type, gain == -1.0f);
+    }
+    if (gain != -1.0f && color_sensor.supports(rs2_option::RS2_OPTION_GAIN))
+    {
+        color_sensor.set_option(rs2_option::RS2_OPTION_GAIN, gain);
+    }
 
-#ifdef LOG_INFO 
-    std::cout << "Sensor supports the following options:\n"
-              << std::endl;
+    if (color_sensor.supports(wb_option_type))
+    {
+        color_sensor.set_option(wb_option_type, 1);
+    }
+    if (depth_sensor.supports(rs2_option::RS2_OPTION_DEPTH_UNITS))
+    {
+        std::cout << "Setting depth unit:" << 0.0001f << std::endl;
+        depth_sensor.set_option(rs2_option::RS2_OPTION_DEPTH_UNITS, 0.0001f);
+    }
+
+#ifdef LOG_INFO
+    std::cout
+        << "Sensor supports the following options:\n"
+        << std::endl;
 
     // The following loop shows how to iterate over all available options
     // Starting from 0 until RS2_OPTION_COUNT (exclusive)
@@ -286,12 +310,12 @@ try
         // Wait for next set of RGB-D frames from the camera
         rs2::frameset data = pipe.wait_for_frames();
         long epoch_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        rs2::frame color = data.get_color_frame();
         // rs2::depth_frame raw_depth = data.get_depth_frame();
 
         // // Get aligned depth frames
-        auto processed = align.process(data);
-        rs2::depth_frame aligned_depth = processed.get_depth_frame();
+        auto aligned_frames = align.process(data);
+        auto color = aligned_frames.first(rs2_stream::RS2_STREAM_COLOR);
+        rs2::depth_frame aligned_depth = aligned_frames.get_depth_frame();
 
         // Find and colorize the depth data
         rs2::frame depth_colorized = color_map.colorize(aligned_depth);
